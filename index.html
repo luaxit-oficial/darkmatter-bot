@@ -1,1 +1,194 @@
 
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Darkmatter Panel</title>
+<style>
+:root{--bg:#0e0c1f;--card:#171430;--line:#2b2650;--tx:#ebe8ff;--mut:#8f89bd;--ac:#9b7bff;--ok:#5eead4;--bad:#ff8fa3}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.5 ui-rounded,"SF Pro Rounded",Nunito,system-ui,sans-serif;padding:18px}
+main{max-width:520px;margin:0 auto}
+h1{font-size:22px;margin:6px 0 4px}
+.sub{color:var(--mut);margin:0 0 20px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;margin-bottom:14px}
+h2{font-size:15px;margin:0 0 10px}
+.mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+.cmd{display:block;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px;font-size:12px;word-break:break-all;margin-bottom:10px;user-select:all}
+label{display:block;font-size:13px;color:var(--mut)}
+input{width:100%;background:var(--bg);color:var(--tx);border:1px solid var(--line);border-radius:10px;padding:11px;font:inherit;margin:4px 0 12px}
+input:focus-visible,button:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
+#code{font-size:22px;letter-spacing:.2em;text-align:center;text-transform:uppercase}
+button{background:var(--ac);color:#12092e;border:0;border-radius:10px;padding:11px 16px;font:inherit;font-weight:700;cursor:pointer}
+button.g{background:#241f4a;color:var(--tx)}
+button.r{background:#3b1c33;color:var(--bad)}
+.row{display:flex;gap:8px;flex-wrap:wrap}.row button{flex:1}
+.status{display:flex;gap:14px;align-items:center}
+.orb{width:54px;height:54px;border-radius:50%;flex:none;border:3px solid var(--line);background:radial-gradient(circle at 35% 30%,#3a3470,var(--card))}
+.orb.on{border-color:var(--ok);box-shadow:0 0 22px #5eead455;animation:p 2.4s ease-in-out infinite}
+@keyframes p{50%{box-shadow:0 0 34px #5eead488}}
+@media(prefers-reduced-motion:reduce){.orb.on{animation:none}}
+.status b{display:block;font-size:17px}.status span{color:var(--mut);font-size:13px}
+.pair{font-size:30px;font-weight:700;letter-spacing:.12em;text-align:center;color:var(--ac);padding:6px 0}
+#log{background:#08071a;border-radius:10px;padding:10px;height:190px;overflow:auto;white-space:pre-wrap;font-size:11px;line-height:1.5;color:#b8b3e0}
+.hide{display:none}.err{color:var(--bad);min-height:1.4em;margin:0 0 8px}
+</style>
+</head>
+<body>
+<main>
+<h1>Darkmatter</h1>
+<p class="sub">Controla tu bot de WhatsApp desde cualquier navegador.</p>
+
+<section id="setup">
+  <div class="card">
+    <h2>1. Instala el bot en Termux</h2>
+    <p class="sub" style="margin-bottom:10px">Pega este comando en Termux. Instala el bot sin encenderlo y te muestra un código.</p>
+    <code class="cmd mono" id="cmd"></code>
+    <button class="g" id="copy">Copiar comando</button>
+  </div>
+  <div class="card">
+    <h2>2. Vincula tu bot</h2>
+    <label for="code">Código que muestra Termux</label>
+    <input id="code" class="mono" maxlength="12" placeholder="0K2E7BD6H" autocomplete="off" autocapitalize="characters">
+    <label for="key0">Tu clave de Groq (obligatoria, cada usuario usa la suya). Créala gratis en <a href="https://console.groq.com/keys" target="_blank" rel="noopener" style="color:var(--ac)">console.groq.com/keys</a></label>
+    <input id="key0" type="password" autocomplete="off" placeholder="gsk_...">
+    <p class="err" id="err"></p>
+    <button id="go" style="width:100%">Vincular</button>
+  </div>
+</section>
+
+<section id="panel" class="hide">
+  <div class="card status">
+    <div class="orb" id="orb"></div>
+    <div><b id="bot">Bot apagado</b><span id="agent">Buscando Termux…</span></div>
+  </div>
+
+  <div class="card hide" id="pairbox">
+    <h2>Vincula WhatsApp con este código</h2>
+    <div class="pair mono" id="pair"></div>
+    <span class="sub">WhatsApp, Dispositivos vinculados, Vincular con número de teléfono.</span>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <button id="start">Encender</button>
+      <button class="g" id="restart">Reiniciar</button>
+      <button class="r" id="stop">Apagar</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Configuración</h2>
+    <label for="nombre">Nombre del bot</label>
+    <input id="nombre" placeholder="DARKMATTER BOT">
+    <label for="numero">Tu número de WhatsApp con código de país</label>
+    <input id="numero" inputmode="numeric" placeholder="573001234567">
+    <label for="groqKey">Tu clave de Groq (obligatoria, cada usuario usa la suya). Créala gratis en <a href="https://console.groq.com/keys" target="_blank" rel="noopener" style="color:var(--ac)">console.groq.com/keys</a></label>
+    <input id="groqKey" type="password" autocomplete="off" placeholder="gsk_...">
+    <label for="model">Modelo de Groq (opcional)</label>
+    <input id="model" placeholder="meta-llama/llama-4-scout-17b-16e-instruct">
+    <label for="grupo">JID del grupo permitido (opcional)</label>
+    <input id="grupo" placeholder="120363...@g.us">
+    <button class="g" id="save" style="width:100%">Guardar configuración</button>
+  </div>
+
+  <div class="card">
+    <h2>Registro</h2>
+    <div id="log" class="mono"></div>
+  </div>
+
+  <div class="row">
+    <button class="r" id="reset">Cerrar sesión de WhatsApp</button>
+    <button class="g" id="exit">Salir del panel</button>
+  </div>
+</section>
+</main>
+
+<script>
+// Pega aquí la URL de tu Realtime Database de Firebase
+const DB_URL = 'https://bot-whatsapp-oficial-default-rtdb.firebaseio.com'
+// Se detecta sola en GitHub Pages (usuario.github.io/repo). Cámbiala si usas otro dominio.
+const RAW = `https://raw.githubusercontent.com/${location.hostname.split('.')[0]}/${location.pathname.split('/')[1]}/main`
+
+const $ = id => document.getElementById(id)
+const FIELDS = ['nombre', 'numero', 'groqKey', 'model', 'grupo']
+let code = null, timer = null
+
+const url = p => `${DB_URL.replace(/\/$/, '')}/bots/${code}/${p}.json`
+const get = async p => { try { const r = await fetch(url(p)); return r.ok ? await r.json() : null } catch { return null } }
+const put = (p, v) => fetch(url(p), { method: 'PUT', body: JSON.stringify(v) })
+const alive = st => st && Date.now() - st.ts < 40000
+
+$('cmd').textContent = `pkg install -y curl && curl -fsSL ${RAW}/install.sh | bash -s -- ${RAW} ${DB_URL}`
+$('copy').onclick = async () => {
+  try { await navigator.clipboard.writeText($('cmd').textContent); $('copy').textContent = 'Copiado' }
+  catch { $('copy').textContent = 'Mantén pulsado el comando para copiarlo' }
+}
+
+async function conectar(c, key) {
+  code = c.toUpperCase().replace(/[^0-9A-Z]/g, '')
+  $('code').value = code
+  $('err').textContent = ''
+  if (code.length !== 9) { $('err').textContent = 'El código tiene 9 caracteres.'; code = null; return }
+  $('go').textContent = 'Conectando…'
+  const st = await get('st')
+  const cfg0 = (await get('ctl/config')) || {}
+  $('go').textContent = 'Vincular'
+  if (!alive(st)) { $('err').textContent = 'No encuentro ese código. Revisa que Termux siga abierto con el bot instalado.'; code = null; return }
+  const k = key || cfg0.groqKey || ''
+  if (!k.startsWith('gsk_')) { $('err').textContent = 'Pega tu propia clave de Groq (empieza con gsk_) para vincular el bot.'; code = null; return }
+  cfg0.groqKey = k
+  await put('ctl/config', cfg0)
+  try { localStorage.setItem('dm_code', code) } catch {}
+  $('setup').classList.add('hide'); $('panel').classList.remove('hide')
+  FIELDS.forEach(f => $(f).value = cfg0[f] || '')
+  tick(); timer = setInterval(tick, 2500)
+}
+
+async function tick() {
+  const [st, logs] = await Promise.all([get('st'), get('logs')])
+  const up = alive(st), on = up && st.running
+  $('orb').classList.toggle('on', !!on)
+  $('bot').textContent = on ? 'Bot encendido' : 'Bot apagado'
+  $('agent').textContent = up ? 'Termux conectado' : 'Termux sin señal'
+  $('pair').textContent = up && st.pair ? st.pair : ''
+  $('pairbox').classList.toggle('hide', !(up && st.pair))
+  const l = $('log'), abajo = l.scrollTop + l.clientHeight >= l.scrollHeight - 20
+  l.textContent = Object.values(logs || {}).join('\n')
+  if (abajo) l.scrollTop = l.scrollHeight
+}
+
+const cfg = () => ({
+  nombre: $('nombre').value.trim(), numero: $('numero').value.replace(/\D/g, ''),
+  groqKey: $('groqKey').value.trim(), model: $('model').value.trim(), grupo: $('grupo').value.trim()
+})
+const guardar = () => put('ctl/config', cfg())
+const enviar = a => put('ctl/cmd', { id: Date.now() + '-' + Math.random().toString(36).slice(2, 6), action: a })
+
+async function accion(a) {
+  if (a === 'start' || a === 'restart') {
+    if (!cfg().numero) { alert('Escribe tu número de WhatsApp con código de país.'); return }
+    if (!cfg().groqKey.startsWith('gsk_')) { alert('Pega tu propia clave de Groq (empieza con gsk_).'); return }
+    await guardar()
+  }
+  await enviar(a)
+}
+
+$('go').onclick = () => conectar($('code').value, $('key0').value.trim())
+$('code').onkeydown = $('key0').onkeydown = e => { if (e.key === 'Enter') conectar($('code').value, $('key0').value.trim()) }
+$('start').onclick = () => accion('start')
+$('restart').onclick = () => accion('restart')
+$('stop').onclick = () => accion('stop')
+$('save').onclick = async () => { await guardar(); $('save').textContent = 'Guardado'; setTimeout(() => $('save').textContent = 'Guardar configuración', 1500) }
+$('reset').onclick = () => { if (confirm('Se apaga el bot y tendrás que vincular WhatsApp otra vez. ¿Continuar?')) enviar('reset') }
+$('exit').onclick = () => {
+  clearInterval(timer); code = null
+  try { localStorage.removeItem('dm_code') } catch {}
+  $('panel').classList.add('hide'); $('setup').classList.remove('hide')
+}
+
+try { const s = localStorage.getItem('dm_code'); if (s) conectar(s) } catch {}
+</script>
+</body>
+</html>
