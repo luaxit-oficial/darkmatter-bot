@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -26,9 +25,14 @@ button.r{background:#3b1c33;color:var(--bad)}
 .row{display:flex;gap:8px;flex-wrap:wrap}.row button{flex:1}
 .status{display:flex;gap:14px;align-items:center}
 .orb{width:54px;height:54px;border-radius:50%;flex:none;border:3px solid var(--line);background:radial-gradient(circle at 35% 30%,#3a3470,var(--card))}
-.orb.on{border-color:var(--ok);box-shadow:0 0 22px #5eead455;animation:p 2.4s ease-in-out infinite}
-@keyframes p{50%{box-shadow:0 0 34px #5eead488}}
-@media(prefers-reduced-motion:reduce){.orb.on{animation:none}}
+.orb{transition:border-color .3s,box-shadow .3s}
+.orb.ok{border-color:var(--ok);box-shadow:0 0 22px #5eead455}
+.orb.warn{border-color:#fb923c;box-shadow:0 0 22px #fb923c55;animation:p 1.4s ease-in-out infinite}
+.orb.link{border-color:var(--ac);box-shadow:0 0 22px #9b7bff66;animation:p 2s ease-in-out infinite}
+.orb.bad{border-color:var(--bad);box-shadow:0 0 18px #ff8fa333}
+.orb.idle{border-color:#4a4570}
+@keyframes p{50%{opacity:.5}}
+@media(prefers-reduced-motion:reduce){.orb{animation:none!important}}
 .status b{display:block;font-size:17px}.status span{color:var(--mut);font-size:13px}
 .pair{font-size:30px;font-weight:700;letter-spacing:.12em;text-align:center;color:var(--ac);padding:6px 0}
 #log{background:#08071a;border-radius:10px;padding:10px;height:190px;overflow:auto;white-space:pre-wrap;font-size:11px;line-height:1.5;color:#b8b3e0}
@@ -49,7 +53,7 @@ button.r{background:#3b1c33;color:var(--bad)}
   </div>
   <div class="card">
     <h2>2. Vincula tu bot</h2>
-    <label for="code">Código que muestra Termux</label>
+    <label for="code">Código que muestra Termux (sirve una sola vez)</label>
     <input id="code" class="mono" maxlength="12" placeholder="0K2E7BD6H" autocomplete="off" autocapitalize="characters">
     <label for="key0">Tu clave de Groq (obligatoria, cada usuario usa la suya). Créala gratis en <a href="https://console.groq.com/keys" target="_blank" rel="noopener" style="color:var(--ac)">console.groq.com/keys</a></label>
     <input id="key0" type="password" autocomplete="off" placeholder="gsk_...">
@@ -113,12 +117,32 @@ const RAW = `https://raw.githubusercontent.com/${location.hostname.split('.')[0]
 
 const $ = id => document.getElementById(id)
 const FIELDS = ['nombre', 'numero', 'groqKey', 'model', 'grupo']
-let code = null, timer = null
+const ABC = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'
+const ACTIVOS = ['encendiendo', 'vinculando', 'reconectando', 'encendido']
+// estado: [color del orbe, título, mensaje]
+const ESTADOS = {
+  apagado: ['bad', 'Bot apagado', 'Toca Encender para iniciarlo.'],
+  encendiendo: ['warn', 'Encendiendo…', 'Conectando con WhatsApp, espera unos segundos.'],
+  vinculando: ['link', 'Esperando vinculación', 'Ingresa el código en WhatsApp para terminar.'],
+  reconectando: ['warn', 'Reconectando…', 'Se perdió la conexión, reintentando.'],
+  encendido: ['ok', 'Bot encendido', 'Conectado a WhatsApp y listo para responder.'],
+  apagando: ['warn', 'Apagando…', 'Cerrando el bot.'],
+  cerrando: ['warn', 'Cerrando sesión…', 'Borrando la sesión de WhatsApp.'],
+  sesion_cerrada: ['idle', 'Sesión cerrada', 'WhatsApp desvinculado. Enciende el bot para vincular de nuevo.'],
+  error: ['bad', 'El bot se detuvo por un error', 'Revisa el registro y vuelve a encenderlo.']
+}
+const OPTIMISTA = { start: 'encendiendo', restart: 'encendiendo', stop: 'apagando', reset: 'cerrando' }
 
-const url = p => `${DB_URL.replace(/\/$/, '')}/bots/${code}/${p}.json`
-const get = async p => { try { const r = await fetch(url(p)); return r.ok ? await r.json() : null } catch { return null } }
-const put = (p, v) => fetch(url(p), { method: 'PUT', body: JSON.stringify(v) })
-const alive = st => st && Date.now() - st.ts < 40000
+let chan = null, timer = null, fallos = 0, opt = null, real = 'apagado'
+
+const at = (id, p) => `${DB_URL.replace(/\/$/, '')}/bots/${id}${p ? '/' + p : ''}.json`
+const getAt = async (id, p) => { try { const r = await fetch(at(id, p)); return r.ok ? await r.json() : null } catch { return null } }
+const putAt = (id, p, v) => fetch(at(id, p), { method: 'PUT', body: JSON.stringify(v) })
+const get = p => getAt(chan, p)
+const put = (p, v) => putAt(chan, p, v)
+const alive = st => st && Date.now() - st.ts < 60000
+const nuevoId = () => Array.from(crypto.getRandomValues(new Uint8Array(9)), b => ABC[b % 32]).join('')
+const sleep = ms => new Promise(r => setTimeout(r, ms))
 
 $('cmd').textContent = `pkg install -y curl && curl -fsSL ${RAW}/install.sh | bash -s -- ${RAW} ${DB_URL}`
 $('copy').onclick = async () => {
@@ -126,34 +150,71 @@ $('copy').onclick = async () => {
   catch { $('copy').textContent = 'Mantén pulsado el comando para copiarlo' }
 }
 
-async function conectar(c, key) {
-  code = c.toUpperCase().replace(/[^0-9A-Z]/g, '')
-  $('code').value = code
-  $('err').textContent = ''
-  if (code.length !== 9) { $('err').textContent = 'El código tiene 9 caracteres.'; code = null; return }
-  $('go').textContent = 'Conectando…'
-  const st = await get('st')
-  const cfg0 = (await get('ctl/config')) || {}
-  $('go').textContent = 'Vincular'
-  if (!alive(st)) { $('err').textContent = 'No encuentro ese código. Revisa que Termux siga abierto con el bot instalado.'; code = null; return }
-  const k = key || cfg0.groqKey || ''
-  if (!k.startsWith('gsk_')) { $('err').textContent = 'Pega tu propia clave de Groq (empieza con gsk_) para vincular el bot.'; code = null; return }
-  cfg0.groqKey = k
-  await put('ctl/config', cfg0)
-  try { localStorage.setItem('dm_code', code) } catch {}
+function mostrarSetup(msg) {
+  clearInterval(timer); chan = null; opt = null; fallos = 0
+  try { localStorage.removeItem('dm_sid') } catch {}
+  $('panel').classList.add('hide'); $('setup').classList.remove('hide')
+  $('go').disabled = false; $('go').textContent = 'Vincular'
+  $('err').textContent = msg || ''
+}
+
+function abrir(cfg) {
+  cfg = cfg || {}
   $('setup').classList.add('hide'); $('panel').classList.remove('hide')
-  FIELDS.forEach(f => $(f).value = cfg0[f] || '')
-  tick(); timer = setInterval(tick, 2500)
+  FIELDS.forEach(k => $(k).value = cfg[k] || '')
+  fallos = 0; opt = null
+  clearInterval(timer); tick(); timer = setInterval(tick, 2500)
+}
+
+// El código de Termux sirve una sola vez: al usarlo se crea un acceso propio de este navegador.
+async function conectar(c, key) {
+  const pair = c.toUpperCase().replace(/[^0-9A-Z]/g, '')
+  $('code').value = pair
+  $('err').textContent = ''
+  if (pair.length !== 9) { $('err').textContent = 'El código tiene 9 caracteres.'; return }
+  if (!key.startsWith('gsk_')) { $('err').textContent = 'Pega tu propia clave de Groq (empieza con gsk_) para vincular el bot.'; return }
+  $('go').disabled = true; $('go').textContent = 'Vinculando…'
+  const fallo = m => mostrarSetup(m)
+  if (!alive(await getAt(pair, 'st'))) return fallo('Ese código no existe o ya se usó. Usa el que muestra Termux ahora.')
+  const sid = nuevoId()
+  await putAt(sid, 'ctl/config', { groqKey: key })
+  await putAt(pair, 'claim', { sid })
+  let ok = false
+  for (let i = 0; i < 8 && !ok; i++) { await sleep(1500); ok = !!(await getAt(sid, 'st')) }
+  if (!ok) {
+    fetch(at(pair, 'claim'), { method: 'DELETE' }).catch(() => {})
+    fetch(at(sid), { method: 'DELETE' }).catch(() => {})
+    return fallo('No se pudo vincular. Revisa que Termux siga abierto y usa el código que muestra ahora.')
+  }
+  chan = sid
+  try { localStorage.setItem('dm_sid', sid) } catch {}
+  abrir(await get('ctl/config'))
+}
+
+async function reanudar(sid) {
+  chan = sid
+  if (!alive(await get('st'))) return mostrarSetup('La sesión anterior terminó. Pega el código nuevo de Termux.')
+  abrir(await get('ctl/config'))
 }
 
 async function tick() {
-  const [st, logs] = await Promise.all([get('st'), get('logs')])
-  const up = alive(st), on = up && st.running
-  $('orb').classList.toggle('on', !!on)
-  $('bot').textContent = on ? 'Bot encendido' : 'Bot apagado'
-  $('agent').textContent = up ? 'Termux conectado' : 'Termux sin señal'
-  $('pair').textContent = up && st.pair ? st.pair : ''
-  $('pairbox').classList.toggle('hide', !(up && st.pair))
+  const [st, logs] = await Promise.all([get('st'), get('logs'), put('ctl/hb', Date.now()).catch(() => {})])
+  if (!chan) return
+  if (!alive(st)) {
+    if (++fallos >= 6) return mostrarSetup('Se perdió la conexión con Termux o la sesión terminó. Pega el código nuevo que muestra Termux.')
+    $('agent').textContent = 'Sin señal de Termux, reintentando…'
+    return
+  }
+  fallos = 0
+  real = st.estado || (st.running ? 'encendido' : 'apagado')
+  let e = real
+  if (opt) { if (real !== opt.previo || Date.now() - opt.t > 8000) opt = null; else e = opt.e }
+  const [color, titulo, mensaje] = ESTADOS[e] || ESTADOS.apagado
+  $('orb').className = 'orb ' + color
+  $('bot').textContent = titulo
+  $('agent').textContent = mensaje
+  $('pair').textContent = st.pair || ''
+  $('pairbox').classList.toggle('hide', !(e === 'vinculando' && st.pair))
   const l = $('log'), abajo = l.scrollTop + l.clientHeight >= l.scrollHeight - 20
   l.textContent = Object.values(logs || {}).join('\n')
   if (abajo) l.scrollTop = l.scrollHeight
@@ -167,12 +228,16 @@ const guardar = () => put('ctl/config', cfg())
 const enviar = a => put('ctl/cmd', { id: Date.now() + '-' + Math.random().toString(36).slice(2, 6), action: a })
 
 async function accion(a) {
+  if (a === 'start' && ACTIVOS.includes(real)) { alert('El bot ya está encendido.'); return }
+  if (a === 'stop' && !ACTIVOS.includes(real)) { alert('El bot ya está apagado.'); return }
   if (a === 'start' || a === 'restart') {
     if (!cfg().numero) { alert('Escribe tu número de WhatsApp con código de país.'); return }
     if (!cfg().groqKey.startsWith('gsk_')) { alert('Pega tu propia clave de Groq (empieza con gsk_).'); return }
     await guardar()
   }
   await enviar(a)
+  opt = { e: OPTIMISTA[a], t: Date.now(), previo: real }
+  tick()
 }
 
 $('go').onclick = () => conectar($('code').value, $('key0').value.trim())
@@ -181,14 +246,14 @@ $('start').onclick = () => accion('start')
 $('restart').onclick = () => accion('restart')
 $('stop').onclick = () => accion('stop')
 $('save').onclick = async () => { await guardar(); $('save').textContent = 'Guardado'; setTimeout(() => $('save').textContent = 'Guardar configuración', 1500) }
-$('reset').onclick = () => { if (confirm('Se apaga el bot y tendrás que vincular WhatsApp otra vez. ¿Continuar?')) enviar('reset') }
-$('exit').onclick = () => {
-  clearInterval(timer); code = null
-  try { localStorage.removeItem('dm_code') } catch {}
-  $('panel').classList.add('hide'); $('setup').classList.remove('hide')
+$('reset').onclick = () => { if (confirm('Se apaga el bot y tendrás que vincular WhatsApp otra vez. ¿Continuar?')) accion('reset') }
+$('exit').onclick = async () => {
+  if (!confirm('Se cierra el panel y este acceso deja de servir. El bot sigue encendido. Para volver a entrar necesitarás el código nuevo que muestra Termux. ¿Salir?')) return
+  try { await enviar('salir') } catch {}
+  mostrarSetup('Panel cerrado. Para volver a entrar pega el código nuevo que muestra Termux.')
 }
 
-try { const s = localStorage.getItem('dm_code'); if (s) conectar(s) } catch {}
+try { const s = localStorage.getItem('dm_sid'); if (s) reanudar(s) } catch {}
 </script>
 </body>
 </html>
