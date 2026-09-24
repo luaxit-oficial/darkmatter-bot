@@ -1,1 +1,11 @@
+{
+  "name": "darkmatter-bot",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.18",
+    "mathjs": "^13.0.0",
+    "pino": "^9.0.0"
+  }
+}
 
